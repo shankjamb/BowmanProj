@@ -1,0 +1,92 @@
+`timescale 1ns/1ps
+module tb_top_module();
+
+    // Declare signals for the top module
+    reg clk;
+    reg reset;
+    reg rx;              // UART receive from PC
+    wire tx;             // UART transmit to PC
+
+    // Instantiate the top module
+    top_module uut (
+        .clk(clk),
+        .reset(reset),
+        .rx(rx),
+        .tx(tx)
+    );
+
+    // Clock generation
+    always begin
+        #5 clk = ~clk;  // 100 MHz clock
+    end
+
+    // Stimulus process
+    initial begin
+        // Initialize signals
+        clk = 0;
+        reset = 0;
+        rx = 1;  // Start with idle state of UART (high)
+
+        // Apply reset
+        reset = 1;
+        #20;
+        reset = 0;
+        
+        // Simulate sending two numbers over UART (example: 8'h12 and 8'h34)
+        
+        // First number 0x12 (18 in decimal)
+        #100;
+        rx = 0;   // Start bit
+        #10;
+        rx = 1;   // Bit 0 of 0x12
+        #10;
+        rx = 0;   // Bit 1 of 0x12
+        #10;
+        rx = 1;   // Bit 2 of 0x12
+        #10;
+        rx = 0;   // Bit 3 of 0x12
+        #10;
+        rx = 1;   // Bit 4 of 0x12
+        #10;
+        rx = 0;   // Bit 5 of 0x12
+        #10;
+        rx = 1;   // Bit 6 of 0x12
+        #10;
+        rx = 0;   // Bit 7 of 0x12 (end of first byte)
+        #10;
+
+        // Second number 0x34 (52 in decimal)
+        #100;
+        rx = 0;   // Start bit
+        #10;
+        rx = 1;   // Bit 0 of 0x34
+        #10;
+        rx = 0;   // Bit 1 of 0x34
+        #10;
+        rx = 1;   // Bit 2 of 0x34
+        #10;
+        rx = 1;   // Bit 3 of 0x34
+        #10;
+        rx = 0;   // Bit 4 of 0x34
+        #10;
+        rx = 1;   // Bit 5 of 0x34
+        #10;
+        rx = 0;   // Bit 6 of 0x34
+        #10;
+        rx = 1;   // Bit 7 of 0x34 (end of second byte)
+        #10;
+
+        // Wait for the sum (0x12 + 0x34 = 0x46, or 70 in decimal)
+        #500;
+
+        // Add more tests if necessary
+        #500;
+        $finish;
+    end
+
+    // Monitor the output
+    initial begin
+        $monitor("At time %t, tx = %b", $time, tx);
+    end
+
+endmodule
