@@ -1,0 +1,9 @@
+`timescale 1ns/1ps
+module adder (
+    input [7:0] num1,
+    input [7:0] num2,
+    output [7:0] sum
+);
+    // Simple combinational adder.
+    assign sum = num1 + num2;
+endmodule
