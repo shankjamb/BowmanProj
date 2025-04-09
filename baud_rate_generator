@@ -1,0 +1,28 @@
+`timescale 1ns/1ps
+module baud_rate_generator #(
+    parameter CLOCK_FREQ = 100_000_000,  // System clock frequency, e.g. 100 MHz
+    parameter BAUD_RATE  = 115200        // Desired baud rate
+)(
+    input clk,
+    input reset,
+    output reg baud_tick
+);
+    // Compute the number of clock cycles per baud tick.
+    localparam integer DIVISOR = CLOCK_FREQ / BAUD_RATE;
+    reg [31:0] counter;
+
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            counter   <= 0;
+            baud_tick <= 0;
+        end else begin
+            if (counter >= (DIVISOR - 1)) begin
+                counter   <= 0;
+                baud_tick <= 1;
+            end else begin
+                counter   <= counter + 1;
+                baud_tick <= 0;
+            end
+        end
+    end
+endmodule
