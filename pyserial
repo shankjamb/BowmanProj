@@ -1,0 +1,41 @@
+import serial
+import time
+
+# Open UART port with 9600 baud (adjust the port name as required)
+ser = serial.Serial('/dev/ttyUSB1', 115200)
+
+# Function to send two numbers to the FPGA
+def send_data():
+    # Define the two numbers to send (for example, 5 and 3)
+    num1 = 5
+    num2 = 3
+    # Convert numbers to bytes (raw 8-bit values)
+    data1 = bytes([num1])
+    data2 = bytes([num2])
+    print(f"Sending first number: {num1}")
+    ser.write(data1)
+    time.sleep(0.1)  # Small delay between bytes
+    print(f"Sending second number: {num2}")
+    ser.write(data2)
+    time.sleep(0.1)
+
+# Function to receive the computed result from the FPGA
+def receive_data():
+    # Wait briefly to allow the FPGA time to process and transmit the sum
+    time.sleep(0.5)
+    # Check if data is available on the serial port
+    if ser.in_waiting:
+        data = ser.read(1)  # Read the single byte transmitted by the FPGA
+        # Convert the raw byte to an integer for display purposes
+        received_value = int.from_bytes(data, byteorder='little')
+        print(f"Received computed sum: {received_value}")
+    else:
+        print("No data received.")
+
+def main():
+    send_data()
+    receive_data()
+    ser.close()
+
+if __name__ == '__main__':
+    main()
