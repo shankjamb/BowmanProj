@@ -1,0 +1,45 @@
+`timescale 1ns/1ps
+module uart_tx (
+    input clk,
+    input reset,
+    input start,           // Start signal triggers transmission
+    input [7:0] data,      // Data to transmit
+    input baud_tick,       // Timing pulse for transmission
+    output reg tx,
+    output reg busy      // High while transmitting
+);
+    // This simplified UART transmitter sends a start bit, 8 data bits, and a stop bit.
+    reg [3:0] bit_cnt;
+    reg [7:0] shift_reg;
+    reg transmitting;
+
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            tx           <= 1'b1; // Idle state is high
+            busy         <= 0;
+            transmitting <= 0;
+            bit_cnt      <= 0;
+        end else if (baud_tick) begin
+            if (start && !busy) begin
+                // Begin transmission
+                transmitting <= 1;
+                busy         <= 1;
+                shift_reg    <= data;
+                bit_cnt      <= 0;
+                tx           <= 0;  // Start bit
+            end else if (transmitting) begin
+                if (bit_cnt < 8) begin
+                    tx <= shift_reg[bit_cnt];
+                    bit_cnt <= bit_cnt + 1;
+                end else if (bit_cnt == 8) begin
+                    tx <= 1;  // Stop bit
+                    bit_cnt <= bit_cnt + 1;
+                end else begin
+                    // End transmission
+                    transmitting <= 0;
+                    busy         <= 0;
+                end
+            end
+        end
+    end
+endmodule
