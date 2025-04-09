@@ -1,0 +1,42 @@
+`timescale 1ns/1ps
+module uart_rx (
+    input clk,
+    input reset,
+    input rx,
+    input baud_tick,        // Timing pulse from the baud rate generator
+    output reg [7:0] data,
+    output reg data_valid
+);
+    // This is a simple UART receiver that captures one byte per transaction.
+    reg [3:0] bit_cnt;
+    reg [7:0] shift_reg;
+    reg receiving;
+
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            data        <= 8'd0;
+            data_valid  <= 0;
+            bit_cnt     <= 0;
+            shift_reg   <= 0;
+            receiving   <= 0;
+        end else if (baud_tick) begin
+            if (!receiving && (rx == 0)) begin // Detect start bit (assuming idle high)
+                receiving <= 1;
+                bit_cnt   <= 0;
+            end else if (receiving) begin
+                if (bit_cnt < 8) begin
+                    shift_reg[bit_cnt] <= rx;
+                    bit_cnt <= bit_cnt + 1;
+                end else begin
+                    data       <= shift_reg;
+                    data_valid <= 1;
+                    receiving  <= 0;
+                end
+            end else begin
+                data_valid <= 0; // Clear valid flag outside a reception period
+            end
+        end else begin
+            data_valid <= 0;
+        end
+    end
+endmodule
