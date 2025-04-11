@@ -1,0 +1,142 @@
+🧭 Full Workflow: Simulating FFT on ZedBoard in Vivado Using Verilog
+STEP 1: Create a New Vivado Project
+Launch Vivado, click Create New Project
+
+Give the project a name (e.g., fft_sim)
+
+Select:
+
+RTL Project
+
+Check “Do not specify sources at this time”
+
+In the Boards tab:
+
+Select ZedBoard Zynq-7000 (xc7z020clg484-1)
+
+Finish project setup
+
+STEP 2: Add and Configure the FFT IP Core
+Open IP Catalog, search for FFT
+
+Double-click Fast Fourier Transform (xfft)
+
+Configure the FFT IP with the following recommended settings:
+
+🔹 Configuration Tab
+Number of Channels: 1
+
+Transform Length: 1024
+
+Data Format: Fixed Point
+
+Architecture: Radix-4 Burst I/O ✅ (keep it for easier simulation)
+
+🔹 Implementation Tab
+Data Format: Fixed Point
+
+Scaling Options: Block Floating Point
+
+Rounding Mode: Round to Nearest
+
+Super Sample Rate: Disabled
+
+Input Data Width: 16
+
+Phase Factor Width: 16
+
+Control Signals (ACLKEN / ARESETn): Disabled ❌
+
+Output Ordering: Natural Order ✅
+
+🔹 Detailed Implementation Tab
+Data Width Strategy: Minimum Bit Width
+
+Resource Optimization: Leave default
+
+Latency Config: Leave default
+
+✅ MOST IMPORTANT:
+Enable TLAST (if not visible, it's auto-included in Burst I/O mode)
+
+s_axis_data_tlast must be available in the IP block ports
+
+Click OK to generate the IP. Vivado may regenerate output products — confirm when prompted.
+
+STEP 3: Create a Verilog Wrapper for the FFT IP
+Go to File > Add Sources > Create File
+
+Name it fft_top.v
+
+Paste this minimal wrapper (with data_last):
+
+verilog
+Copy
+Edit
+module fft_top (
+    input wire clk,
+    input wire rst,
+    input wire [15:0] data_in,
+    input wire data_valid,
+    input wire data_last,
+    output wire [31:0] fft_out,
+    output wire fft_out_valid
+);
+
+wire s_axis_data_tready;
+wire [31:0] fft_input = {data_in, 16'd0};
+
+reg config_sent = 0;
+wire config_valid = ~config_sent;
+
+always @(posedge clk or posedge rst) begin
+    if (rst) config_sent <= 0;
+    else if (!config_sent) config_sent <= 1;
+end
+
+xfft_0 fft_inst (
+    .aclk(clk),
+    .s_axis_data_tvalid(data_valid),
+    .s_axis_data_tready(s_axis_data_tready),
+    .s_axis_data_tdata(fft_input),
+    .s_axis_data_tlast(data_last),
+    .s_axis_config_tvalid(config_valid),
+    .s_axis_config_tdata(8'b00000000),
+    .m_axis_data_tvalid(fft_out_valid),
+    .m_axis_data_tdata(fft_out)
+);
+
+endmodule
+Replace xfft_0 with your actual FFT IP instance name if different.
+
+STEP 4: Create a Verilog Testbench
+Go to File > Add Sources > Create File
+
+File type: Verilog, name: tb_fft.v
+
+You’ll write the testbench to:
+
+Feed a 1024-point sine wave to fft_top
+
+Pulse data_valid and data_last correctly
+
+Observe fft_out_valid and fft_out
+
+(We'll assume you're rebuilding this part fresh, or we’ll revisit it once IP output is verified.)
+
+STEP 5: Run Behavioral Simulation
+Go to Simulation > Run Behavioral Simulation
+
+Enable full signal visibility:
+
+Simulation Settings → Set xsim.simulate.log_all_signals to true
+
+Add internal FFT signals to the waveform:
+
+data_valid, data_last
+
+fft_out_valid, fft_out
+
+s_axis_data_tready
+
+Observe when fft_out_valid goes high and check fft_out contents
