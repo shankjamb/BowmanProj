@@ -1,0 +1,130 @@
+///FPGA with FFT LOGIC
+
+TOP FILE
+module fft_top (
+    input wire clk,
+    input wire rst,
+    input wire [15:0] data_in,         // Real input (Q1.15 fixed-point)
+    input wire data_valid,
+    input wire data_last,             // TLAST input to signal end of frame
+    output wire [31:0] fft_out,        // Output: [31:16]=real, [15:0]=imag
+    output wire fft_out_valid
+);
+
+// Wire declarations
+wire s_axis_data_tready;
+wire [31:0] fft_input;
+assign fft_input = {data_in, 16'd0};  // Imaginary part is 0
+
+// Config control (pulse config_valid once)
+reg config_sent = 0;
+wire config_valid;
+
+always @(posedge clk or posedge rst) begin
+    if (rst) begin
+        config_sent <= 0;
+    end else if (!config_sent) begin
+        config_sent <= 1;
+    end
+end
+
+assign config_valid = ~config_sent;
+
+// FFT IP instance
+xfft_0 fft_inst (
+    .aclk(clk),
+    .s_axis_data_tvalid(data_valid),
+    .s_axis_data_tready(s_axis_data_tready),
+    .s_axis_data_tdata(fft_input),
+    .s_axis_data_tlast(data_last),                  // TLAST connected
+
+    .s_axis_config_tvalid(config_valid),
+    .s_axis_config_tdata(8'b00000000),              // Forward FFT
+
+    .m_axis_data_tvalid(fft_out_valid),
+    .m_axis_data_tdata(fft_out)
+
+    // Optional debug/event ports can be added if needed
+    //.event_frame_started(),
+    //.event_tlast_unexpected(),
+    //.event_tlast_missing(),
+    //.event_data_in_channel_halt(),
+    //.event_data_out_channel_halt()
+);
+
+endmodule
+
+
+
+TB FILE
+`timescale 1ns / 1ps
+
+module tb_fft;
+
+reg clk = 0;
+reg rst = 1;
+reg [15:0] data_in = 0;
+reg data_valid = 0;
+reg data_last = 0;
+wire [31:0] fft_out;
+wire fft_out_valid;
+
+integer i;
+real angle;
+real PI = 3.14159265;
+real freq = 10.0;
+real amp = 0.9;
+integer N = 1024;
+reg signed [15:0] sine_samples [0:1023];
+
+// Instantiate the FFT top module
+fft_top uut (
+    .clk(clk),
+    .rst(rst),
+    .data_in(data_in),
+    .data_valid(data_valid),
+    .data_last(data_last),
+    .fft_out(fft_out),
+    .fft_out_valid(fft_out_valid)
+);
+
+// Clock generation
+always #5 clk = ~clk;
+
+// Generate sine wave samples
+initial begin
+    for (i = 0; i < N; i = i + 1) begin
+        angle = 2.0 * PI * freq * i / N;
+        sine_samples[i] = $rtoi(amp * (2**15 - 1) * $sin(angle));
+    end
+end
+
+// Reset sequence
+initial begin
+    rst = 1;
+    #100;
+    rst = 0;
+end
+
+// Send data aligned to clock
+initial begin
+    // Wait for reset to complete
+    @(negedge rst);
+    repeat (10) @(posedge clk);
+
+    for (i = 0; i < N; i = i + 1) begin
+        @(posedge clk);
+        data_in    = sine_samples[i];
+        data_valid = 1;
+        data_last  = (i == N - 1);  // <--- guaranteed TLAST
+    end
+
+    @(posedge clk);
+    data_valid = 0;
+    data_last  = 0;
+
+    #20000;
+    $finish;
+end
+
+endmodule
