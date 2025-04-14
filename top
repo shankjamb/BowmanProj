@@ -1,208 +1,52 @@
-`timescale 1ns/1ps
-module top_module (
-    input clk,
-    input reset,
-    input rx,   // UART receive from PC
-    output tx   // UART transmit to PC
+module fft_top (
+    input wire clk,
+    input wire rst,
+    input wire [15:0] data_in,         // Real input (Q1.15 fixed-point)
+    input wire data_valid,
+    input wire data_last,             // TLAST input to signal end of frame
+    output wire [31:0] fft_out,        // Output: [31:16]=real, [15:0]=imag
+    output wire fft_out_valid
 );
-    //==========================================================================
-    // Baud Rate Generator
-    //==========================================================================
-    wire baud_tick;
-    baud_rate_generator #(
-        .CLOCK_FREQ(100_000_000),
-        .BAUD_RATE(115200)
-    ) baud_gen_inst (
-        .clk(clk),
-        .reset(reset),
-        .baud_tick(baud_tick)
-    );
-    
-    //==========================================================================
-    // UART Receiver Module
-    //==========================================================================
-    wire [7:0] uart_rx_data;
-    wire uart_rx_valid;
-    uart_rx uart_rx_inst (
-        .clk(clk),
-        .reset(reset),
-        .rx(rx),
-        .baud_tick(baud_tick),
-        .data(uart_rx_data),
-        .data_valid(uart_rx_valid)
-    );
-    
-    //==========================================================================
-    // UART Transmitter Module
-    //==========================================================================
-    reg tx_start;
-    reg [7:0] tx_data;
-    wire tx_busy;
-    uart_tx uart_tx_inst (
-        .clk(clk),
-        .reset(reset),
-        .start(tx_start),
-        .data(tx_data),
-        .baud_tick(baud_tick),
-        .tx(tx),
-        .busy(tx_busy)
-    );
-    
-    //==========================================================================
-    // BRAM Instance and Related Signals
-    //==========================================================================
-    reg bram_we;
-    reg [7:0] bram_addr;
-    reg [7:0] bram_din;
-    wire [7:0] bram_dout;
-    
-    bram_memory bram_inst (
-        .clk(clk),
-        .we(bram_we),
-        .addr(bram_addr),
-        .din(bram_din),
-        .dout(bram_dout)
-    );
-    
-    //==========================================================================
-    // Registers to Hold Numbers and Sum
-    //==========================================================================
-    reg [7:0] stored_num1;
-    reg [7:0] stored_num2;
-    reg [7:0] stored_sum;
-    reg [7:0] sum_to_send;
-    
-    //==========================================================================
-    // Adder Module: Combinationally adds stored_num1 and stored_num2
-    //==========================================================================
-    wire [7:0] adder_out;
-    adder adder_inst (
-        .num1(stored_num1),
-        .num2(stored_num2),
-        .sum(adder_out)
-    );
-    
-    //==========================================================================
-    // Finite State Machine (FSM)
-    //==========================================================================
-    reg [3:0] state;
-    localparam  WAIT_FOR_NUM1       = 4'd0,
-                WRITE_NUM1          = 4'd1,
-                WAIT_FOR_NUM2       = 4'd2,
-                WRITE_NUM2          = 4'd3,
-                READ_NUM1           = 4'd4,
-                READ_NUM1_WAIT      = 4'd5,
-                READ_NUM2           = 4'd6,
-                READ_NUM2_WAIT      = 4'd7,
-                COMPUTE_SUM         = 4'd8,
-                WRITE_SUM           = 4'd9,
-                READ_SUM            = 4'd10,
-                READ_SUM_WAIT       = 4'd11,
-                SEND_SUM            = 4'd12,
-                WAIT_FOR_TX_COMPLETE= 4'd13;
-                
-    //==========================================================================
-    // FSM Implementation: Control BRAM reads/writes and UART operations.
-    //==========================================================================
-    always @(posedge clk or posedge reset) begin
-        if (reset) begin
-            state         <= WAIT_FOR_NUM1;
-            bram_we       <= 0;
-            tx_start      <= 0;
-            stored_num1   <= 0;
-            stored_num2   <= 0;
-            stored_sum    <= 0;
-            sum_to_send   <= 0;
-            bram_addr     <= 0;
-            bram_din      <= 0;
-            tx_data       <= 0;
-        end else begin
-            case (state)
-                //--------------- Capture and write the first number ---------------
-                WAIT_FOR_NUM1: begin
-                    bram_we  <= 0;
-                    tx_start <= 0;
-                    if (uart_rx_valid) begin
-                        bram_addr <= 8'd0;         // Address 0 for the first number
-                        bram_din  <= uart_rx_data;  // Data from UART RX
-                        state     <= WRITE_NUM1;
-                    end
-                end
-                WRITE_NUM1: begin
-                    bram_we <= 1;  // Write first number into BRAM at address 0
-                    state   <= WAIT_FOR_NUM2;
-                end
-                //--------------- Capture and write the second number ---------------
-                WAIT_FOR_NUM2: begin
-                    bram_we <= 0;
-                    if (uart_rx_valid) begin
-                        bram_addr <= 8'd1;         // Address 1 for the second number
-                        bram_din  <= uart_rx_data;
-                        state     <= WRITE_NUM2;
-                    end
-                end
-                WRITE_NUM2: begin
-                    bram_we <= 1;  // Write second number into BRAM at address 1
-                    state   <= READ_NUM1;
-                end
-                //--------------- Read first number from BRAM ---------------
-                READ_NUM1: begin
-                    bram_we   <= 0;
-                    bram_addr <= 8'd0; // Set address to read first number
-                    state     <= READ_NUM1_WAIT;
-                end
-                READ_NUM1_WAIT: begin
-                    stored_num1 <= bram_dout; // Capture num1 from BRAM
-                    state       <= READ_NUM2;
-                end
-                //--------------- Read second number from BRAM ---------------
-                READ_NUM2: begin
-                    bram_addr <= 8'd1; // Set address to read second number
-                    state     <= READ_NUM2_WAIT;
-                end
-                READ_NUM2_WAIT: begin
-                    stored_num2 <= bram_dout; // Capture num2 from BRAM
-                    state       <= COMPUTE_SUM;
-                end
-                //--------------- Compute the sum using the adder module ---------------
-                COMPUTE_SUM: begin
-                    stored_sum <= adder_out;  // Calculate sum = stored_num1 + stored_num2
-                    state      <= WRITE_SUM;
-                end
-                //--------------- Write the computed sum to BRAM ---------------
-                WRITE_SUM: begin
-                    bram_we   <= 1;
-                    bram_addr <= 8'd2;          // Address 2 for the sum
-                    bram_din  <= adder_out;
-                    state     <= READ_SUM;
-                end
-                //--------------- Read back the sum from BRAM ---------------
-                READ_SUM: begin
-                    bram_we   <= 0;
-                    bram_addr <= 8'd2;          // Read from address 2
-                    state     <= READ_SUM_WAIT;
-                end
-                READ_SUM_WAIT: begin
-                    sum_to_send <= bram_dout;   // Capture the sum from BRAM
-                    state       <= SEND_SUM;
-                end
-                //--------------- Transmit the sum via UART ---------------
-                SEND_SUM: begin
-                    if (!tx_busy) begin
-                        tx_data  <= sum_to_send;  // Load the data to transmit
-                        tx_start <= 1;            // Trigger UART transmission
-                        state    <= WAIT_FOR_TX_COMPLETE;
-                    end
-                end
-                WAIT_FOR_TX_COMPLETE: begin
-                    // Clear start once transmission begins, then wait for completion.
-                    if (tx_busy)
-                        tx_start <= 0;
-                    else
-                        state <= WAIT_FOR_NUM1; // After TX completes, start a new transaction
-                end
-                default: state <= WAIT_FOR_NUM1;
-            endcase
-        end
+
+// Wire declarations
+wire s_axis_data_tready;
+wire [31:0] fft_input;
+assign fft_input = {data_in, 16'd0};  // Imaginary part is 0
+
+// Config control (pulse config_valid once)
+reg config_sent = 0;
+wire config_valid;
+
+always @(posedge clk or posedge rst) begin
+    if (rst) begin
+        config_sent <= 0;
+    end else if (!config_sent) begin
+        config_sent <= 1;
     end
+end
+
+assign config_valid = ~config_sent;
+
+// FFT IP instance
+xfft_0 fft_inst (
+    .aclk(clk),
+    .s_axis_data_tvalid(data_valid),
+    .s_axis_data_tready(s_axis_data_tready),
+    .s_axis_data_tdata(fft_input),
+    .s_axis_data_tlast(data_last),                  // TLAST connected
+
+    .s_axis_config_tvalid(config_valid),
+    .s_axis_config_tdata(8'b00000000),              // Forward FFT
+
+    .m_axis_data_tvalid(fft_out_valid),
+    .m_axis_data_tdata(fft_out),
+
+    // Optional debug/event ports can be added if needed
+    .event_frame_started(),
+    .event_tlast_unexpected(),
+    .event_tlast_missing()
+    //.event_data_in_channel_halt(),
+    //.event_data_out_channel_halt()
+);
+
 endmodule
