@@ -1,92 +1,111 @@
-`timescale 1ns/1ps
-module tb_top_module();
+`timescale 1ns / 1ps
 
-    // Declare signals for the top module
-    reg clk;
-    reg reset;
-    reg rx;              // UART receive from PC
-    wire tx;             // UART transmit to PC
+module tb_fft;
 
-    // Instantiate the top module
-    top_module uut (
-        .clk(clk),
-        .reset(reset),
-        .rx(rx),
-        .tx(tx)
-    );
+reg clk = 0;
+reg rst = 1;
+reg [15:0] data_in = 0;
+reg data_valid = 0;
+reg data_last = 0;
+wire [31:0] fft_out;
+wire fft_out_valid;
 
-    // Clock generation
-    always begin
-        #5 clk = ~clk;  // 100 MHz clock
+integer i;
+real angle;
+real PI = 3.14159265;
+real freq = 10.0;
+real amp = 0.9;
+integer N = 1024;
+reg signed [15:0] sine_samples [0:1023];
+
+// For detecting dominant frequency
+reg signed [15:0] real_part;
+reg signed [15:0] imag_part;
+reg [31:0] magnitude_squared;
+reg [31:0] max_magnitude_squared = 0;
+integer max_bin = 0;
+integer bin_index = 0;
+
+// For Hz conversion
+real Fs = 100_000_000.0;         // 100 MHz clock
+real bin_resolution;
+real dominant_freq_hz;
+
+// Instantiate the FFT top module
+fft_top uut (
+    .clk(clk),
+    .rst(rst),
+    .data_in(data_in),
+    .data_valid(data_valid),
+    .data_last(data_last),
+    .fft_out(fft_out),
+    .fft_out_valid(fft_out_valid)
+);
+
+// Clock = 100 MHz
+always #5 clk = ~clk;
+
+// Generate sine wave samples
+initial begin
+    for (i = 0; i < N; i = i + 1) begin
+        angle = 2.0 * PI * freq * i / N;
+        sine_samples[i] = $rtoi(amp * (2**15 - 1) * $sin(angle));
+    end
+end
+
+// Reset sequence
+initial begin
+    rst = 1;
+    #100;
+    rst = 0;
+end
+
+// Feed sine wave to FFT
+initial begin
+    @(negedge rst);
+    repeat (10) @(posedge clk);
+
+    for (i = 0; i < N; i = i + 1) begin
+        @(posedge clk);
+        data_in    = sine_samples[i];
+        data_valid = 1;
+
+        if (i == N - 1) begin
+            data_last = 1;
+            $display("ASSERTING TLAST on i = %0d at time %t", i, $time);
+        end else begin
+            data_last = 0;
+        end
     end
 
-    // Stimulus process
-    initial begin
-        // Initialize signals
-        clk = 0;
-        reset = 0;
-        rx = 1;  // Start with idle state of UART (high)
+    @(posedge clk);
+    data_valid = 0;
+    data_last  = 0;
+end
 
-        // Apply reset
-        reset = 1;
-        #20;
-        reset = 0;
-        
-        // Simulate sending two numbers over UART (example: 8'h12 and 8'h34)
-        
-        // First number 0x12 (18 in decimal)
-        #100;
-        rx = 0;   // Start bit
-        #10;
-        rx = 1;   // Bit 0 of 0x12
-        #10;
-        rx = 0;   // Bit 1 of 0x12
-        #10;
-        rx = 1;   // Bit 2 of 0x12
-        #10;
-        rx = 0;   // Bit 3 of 0x12
-        #10;
-        rx = 1;   // Bit 4 of 0x12
-        #10;
-        rx = 0;   // Bit 5 of 0x12
-        #10;
-        rx = 1;   // Bit 6 of 0x12
-        #10;
-        rx = 0;   // Bit 7 of 0x12 (end of first byte)
-        #10;
+// Monitor FFT output and find dominant frequency bin
+always @(posedge clk) begin
+    if (fft_out_valid) begin
+        real_part = fft_out[31:16];
+        imag_part = fft_out[15:0];
+        magnitude_squared = real_part * real_part + imag_part * imag_part;
 
-        // Second number 0x34 (52 in decimal)
-        #100;
-        rx = 0;   // Start bit
-        #10;
-        rx = 1;   // Bit 0 of 0x34
-        #10;
-        rx = 0;   // Bit 1 of 0x34
-        #10;
-        rx = 1;   // Bit 2 of 0x34
-        #10;
-        rx = 1;   // Bit 3 of 0x34
-        #10;
-        rx = 0;   // Bit 4 of 0x34
-        #10;
-        rx = 1;   // Bit 5 of 0x34
-        #10;
-        rx = 0;   // Bit 6 of 0x34
-        #10;
-        rx = 1;   // Bit 7 of 0x34 (end of second byte)
-        #10;
+        if (magnitude_squared > max_magnitude_squared) begin
+            max_magnitude_squared <= magnitude_squared;
+            max_bin <= bin_index;
+        end
 
-        // Wait for the sum (0x12 + 0x34 = 0x46, or 70 in decimal)
-        #500;
+        bin_index <= bin_index + 1;
 
-        // Add more tests if necessary
-        #500;
-        $finish;
+        if (bin_index == (N / 2) - 1) begin
+            bin_resolution = Fs / N;
+            dominant_freq_hz = max_bin * bin_resolution;
+
+            $display("Dominant Frequency Bin = %0d", max_bin);
+            $display("Dominant Frequency ≈ %0.2f Hz", dominant_freq_hz);
+            $finish;
+        end
     end
-
-    // Monitor the output
-    initial begin
-        $monitor("At time %t, tx = %b", $time, tx);
-    end
+end
 
 endmodule
